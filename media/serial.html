@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>串口监视器</title>
+</head>
+<body>
+  <main>
+    <form id="connection" class="connection">
+      <label class="port-field">串口<div class="port-row"><select id="port" aria-label="串口"><option value="">正在检测串口…</option></select><button type="button" id="refresh" class="secondary" title="重新检测串口" aria-label="刷新串口">↻</button></div></label>
+      <label id="manual-field" hidden>设备路径<input id="manual" placeholder="COM3 / /dev/ttyUSB0" spellcheck="false" aria-label="设备路径"></label>
+      <label class="baud-field">波特率<input id="baud" type="number" list="baud-rates" min="1" max="4000000" value="115200" required aria-label="波特率"><datalist id="baud-rates"><option value="9600"><option value="19200"><option value="38400"><option value="57600"><option value="115200"><option value="230400"><option value="460800"><option value="921600"></datalist></label>
+      <button type="submit" id="connect">连接</button>
+      <button type="button" id="disconnect" class="secondary" disabled>断开</button>
+      <details id="advanced"><summary>高级设置</summary><div class="advanced-fields">
+        <label>数据位<select id="dataBits"><option>8</option><option>7</option><option>6</option><option>5</option></select></label>
+        <label>校验<select id="parity"><option value="none">None</option><option value="even">Even</option><option value="odd">Odd</option><option value="mark">Mark</option><option value="space">Space</option></select></label>
+        <label>停止位<select id="stopBits"><option>1</option><option>1.5</option><option>2</option></select></label>
+        <label>流控<select id="flow"><option value="none">无</option><option value="rtscts">RTS / CTS</option></select></label>
+      </div></details>
+    </form>
+    <div id="port-note" class="note" role="status">正在检测本机串口…</div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div class="monitor-toolbar">
+      <span id="status" class="status"><span class="dot"></span><span id="status-text">未连接</span></span>
+      <select id="sessions" aria-label="串口会话"><option value="">尚无串口会话</option></select>
+      <div class="toolbar-spacer"></div>
+      <label class="inline">显示<select id="display"><option value="text">文本</option><option value="hex">HEX</option></select></label>
+      <label class="check"><input type="checkbox" id="timestamps" checked>时间戳</label>
+      <label class="check"><input type="checkbox" id="autoscroll" checked>自动滚动</label>
+      <button type="button" id="clear" class="quiet">清空显示</button>
+      <button type="button" id="terminal" class="quiet" disabled title="在原生终端中逐键输入">终端 ↗</button>
+    </div>
+    <section class="output-area" aria-label="串口收发记录">
+      <div id="empty" class="empty">
+        <div class="empty-icon">&gt;_</div>
+        <h2>连接设备，开始串口协作</h2>
+        <p>选择串口和波特率，然后点击「连接」。</p>
+        <p class="muted">设备接收 RX、你的发送 TX 和 AI 输入会显示在这里。</p>
+      </div>
+      <div id="output" tabindex="0" aria-label="串口数据"></div>
+    </section>
+    <form id="send-form" class="send-form">
+      <select id="encoding" aria-label="发送编码"><option value="utf8">文本 UTF-8</option><option value="hex">HEX 字节</option></select>
+      <input id="input" aria-label="发送内容" placeholder="输入内容，按 Enter 发送" autocomplete="off" spellcheck="false" maxlength="65536" disabled>
+      <select id="ending" aria-label="发送行尾"><option value="crlf">CRLF</option><option value="cr">CR</option><option value="lf">LF</option><option value="none">无换行</option></select>
+      <button id="send" type="submit" disabled>发送</button>
+    </form>
+    <footer><span>人和 AI 共享连接 · 输入互不暂停</span><span id="counter">RX 0 B · TX 0 B</span></footer>
+  </main>
+  <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+src/**
+scripts/**
+.vscode/**
+.test-results/**
+.npm-cache/**
+dist/test/**
+dist/integration/**
+**/*.map
+tsconfig.json
+.gitignore
+*.vsix
+*.log
+.shared-terminal/**

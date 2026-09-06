@@ -1,0 +1,230 @@
+{
+  "name": "shared-terminal-mcp",
+  "displayName": "协作终端 MCP",
+  "description": "人和 AI 共用的 SSH、串口与本地终端，支持实时观测和共同输入。",
+  "version": "0.3.1",
+  "publisher": "local-tools",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:sharedTerminal.serial",
+    "onMcpServerDefinitionProvider:sharedTerminal.mcp"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test": "npm run compile && node --test dist/test",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --allow-missing-repository",
+    "test:ui": "node scripts/test-serial-ui.cjs"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "node-pty": "^1.1.0",
+    "serialport": "^13.0.0",
+    "ssh2": "^1.17.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.0.0",
+    "@types/ssh2": "^1.15.0",
+    "@types/vscode": "1.102.0",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^5.9.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "sharedTerminal.openLocal",
+        "title": "协作终端: 打开本地终端",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "sharedTerminal.openSsh",
+        "title": "协作终端: 连接 SSH",
+        "icon": "$(remote)"
+      },
+      {
+        "command": "sharedTerminal.addSsh",
+        "title": "协作终端: 添加 SSH 配置"
+      },
+      {
+        "command": "sharedTerminal.openSerial",
+        "title": "协作终端: 打开串口",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "sharedTerminal.show",
+        "title": "协作终端: 显示会话",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "sharedTerminal.close",
+        "title": "协作终端: 关闭会话",
+        "icon": "$(close)"
+      },
+      {
+        "command": "sharedTerminal.audit",
+        "title": "协作终端: 查看 AI 输入记录",
+        "icon": "$(output)"
+      },
+      {
+        "command": "sharedTerminal.mcpConfig",
+        "title": "协作终端: 查看 MCP 连接配置",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "sharedTerminal.enableAiConnection",
+        "title": "协作终端: 一键修复 AI 接入",
+        "icon": "$(link)"
+      }
+    ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "sharedTerminal",
+          "title": "协作终端",
+          "icon": "media/terminal.svg"
+        }
+      ]
+    },
+    "views": {
+      "sharedTerminal": [
+        {
+          "id": "sharedTerminal.serial",
+          "name": "串口监视器",
+          "type": "webview",
+          "visibility": "visible"
+        },
+        {
+          "id": "sharedTerminal.sessions",
+          "name": "全部会话",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "sharedTerminal.sessions",
+        "contents": "人和 AI 共享同一个终端。\n[打开本地终端](command:sharedTerminal.openLocal)\n[连接 SSH](command:sharedTerminal.openSsh)\n[打开串口](command:sharedTerminal.openSerial)\n[查看 MCP 连接配置](command:sharedTerminal.mcpConfig)"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "sharedTerminal.mcp",
+        "label": "协作终端 MCP"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "sharedTerminal.openLocal",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sharedTerminal.openSsh",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sharedTerminal.openSerial",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
+          "group": "navigation@3"
+        },
+        {
+          "command": "sharedTerminal.audit",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
+          "group": "navigation@5"
+        },
+        {
+          "command": "sharedTerminal.mcpConfig",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial"
+        },
+        {
+          "command": "sharedTerminal.enableAiConnection",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
+          "group": "navigation@6"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "sharedTerminal.close",
+          "when": "view == sharedTerminal.sessions",
+          "group": "inline@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "协作终端 MCP",
+      "properties": {
+        "sharedTerminal.mcpPort": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "本机 MCP 端口；0 自动分配。修改后重新加载窗口。"
+        },
+        "sharedTerminal.shell": {
+          "type": "string",
+          "default": "",
+          "description": "本地 Shell 可执行文件，空值使用系统默认。"
+        },
+        "sharedTerminal.sshProfiles": {
+          "type": "array",
+          "default": [],
+          "scope": "application",
+          "description": "SSH 连接配置。密码和私钥口令由命令输入并存入 VS Code SecretStorage。",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "host",
+              "username"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "number",
+                "default": 22
+              },
+              "username": {
+                "type": "string"
+              },
+              "privateKeyPath": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.vsix
+.test-results/
+.npm-cache/
+*.log
+/.shared-terminal/
