@@ -29,7 +29,7 @@ export async function run(): Promise<void> {
     const registered = (codexConfig.mcp_servers as any).shared_terminal;
     assert.ok(registered, 'Activation registers Codex without a command or opt-in flag');
     await agent.connect(new StdioClientTransport({ command: registered.command, args: registered.args, env: { ...process.env, ...registered.env } as Record<string, string> }));
-    assert.equal((await agent.listTools()).tools.length, 11, 'Generated configuration launches bridge with bundled VS Code runtime');
+    assert.equal((await agent.listTools()).tools.length, 5, 'Generated configuration launches bridge with bundled VS Code runtime');
     if (process.env.SHARED_TERMINAL_CODEX_TEST_EXE) {
       const output = await promisify(execFile)(process.env.SHARED_TERMINAL_CODEX_TEST_EXE, ['mcp', 'list', '--json'], { env: process.env, windowsHide: true, timeout: 15000 });
       assert.ok(JSON.parse(output.stdout).some((server: any) => server.name === 'shared_terminal' && server.enabled), 'Real Codex CLI recognizes automatically registered server');
@@ -55,8 +55,8 @@ export async function run(): Promise<void> {
     const bridgeResponse = await agent.callTool({ name: 'list_sessions', arguments: {} });
     const bridged = JSON.parse((bridgeResponse.content as { text: string }[])[0].text);
     assert.ok(bridged.some((session: any) => session.id === id && session.windowId), 'Bridge shares actual native terminal session');
-    terminal.sendText("Write-Output ('HOST_' + 'HUMAN_OK')", true);
-    const write = await agent.callTool({ name: 'write_session', arguments: { sessionId: id, data: "Write-Output ('HOST_' + 'AI_OK')\r" } });
+    terminal.sendText(process.platform === 'win32' ? "Write-Output ('HOST_' + 'HUMAN_OK')" : "printf 'HOST_%s\\n' HUMAN_OK", true);
+    const write = await agent.callTool({ name: 'write_session', arguments: { sessionId: id, data: process.platform === 'win32' ? "Write-Output ('HOST_' + 'AI_OK')\r" : "printf 'HOST_%s\\n' AI_OK\r" } });
     assert.ok(!write.isError, JSON.stringify(write));
     let cursor = 0;
     let output = '';
@@ -76,10 +76,10 @@ export async function run(): Promise<void> {
     }
     assert.ok(humanInput && aiInput, 'Both input sources recorded');
     assert.ok(output.includes('HOST_HUMAN_OK') && output.includes('HOST_AI_OK'), `Actual shell executed both inputs: ${JSON.stringify(output)}`);
-    const ports = await client.callTool({ name: 'list_serial_ports', arguments: {} });
+    const ports = await client.callTool({ name: 'session', arguments: { action: 'ports' } });
     assert.ok(!ports.isError, 'Serial native addon loads inside Electron extension host');
     await vscode.commands.executeCommand('sharedTerminal.audit');
-    await client.callTool({ name: 'close_session', arguments: { sessionId: id } });
+    await client.callTool({ name: 'session', arguments: { action: 'close', sessionId: id } });
     terminal.dispose();
     await writeFile(join(results, 'vscode-integration.json'), JSON.stringify({ passed: true, version: extension.packageJSON.version, extensionPath: extension.extensionPath, checks: ['automatic registration without opt-in', 'bundled Code.exe stdio runtime', 'real Codex CLI config loading', 'bridge/native terminal same session', 'Chinese labels', 'serial bottom webview ready', 'reopen hidden serial panel', 'human sendText', 'AI input through bridge', 'shell execution', 'serial native addon', 'audit command', 'close'] }, null, 2));
   } catch (error) {

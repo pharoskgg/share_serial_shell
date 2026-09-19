@@ -1,3 +1,17 @@
+# 0.4.0 本次验证
+
+环境：macOS arm64，Node.js 23。`npm test` 34 项全部通过，包括真实 PTY、回环 SSH、HTTP MCP、stdio 桥接器、SerialPortMock，以及新增的发送节流 / 排队 / 断开取消、非回显终端 AI 输入显示、精简读取分页、串口分包合并、跨分包 UTF-8、平台 Shell 和 WSL 路径测试。
+
+串口面板浏览器测试通过（本机 Chrome）：空设备、手动设备路径、连接参数、AI 输入记录、HEX、断开、XSS 和窄窗口布局。未运行本次 VS Code Extension Host 联调。
+
+已添加 `.github/workflows/ci.yml`：macOS arm64、Windows x64、Linux x64 分别安装、测试、浏览器验证并打包。该 CI 尚未在本次本地工作中执行，不能据此宣称 Windows / Linux / WSL 实机通过。未连接真实嵌入式设备，需在目标设备上确认 4 字节 / 6ms 节奏。
+
+WSL 手动验收：在 Remote WSL 安装 Linux VSIX；确认扩展运行在 WSL，打开本地会话后执行 `uname -a`；确认当前工作目录为远程工作区、WSL 内 Agent 能发现会话；透传 USB 串口后确认 `/dev/ttyUSB*` 或 `/dev/ttyACM*` 可收发；在原生终端内检查 `[AI →]` 记录；发送途中断开，确认后续字节停止。Windows COM 模式应切回 UI 宿主并使用 Windows VSIX。
+
+下方为 0.3.x 历史验证记录，不代表新版本已重新执行这些平台验证。
+
+---
+
 # 验证记录
 
 验证日期：2026-09-06；版本 0.3.0。

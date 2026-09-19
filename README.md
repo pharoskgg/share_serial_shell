@@ -6,7 +6,7 @@
 
 ## 安装与开始
 
-1. 在 VS Code 扩展页面右上角 `…` 选择 **从 VSIX 安装**，选择 `shared-terminal-mcp-0.3.1.vsix`。更新后重新加载窗口，使界面和后台代码一起更新。
+1. 在 VS Code 扩展页面右上角 `…` 选择 **从 VSIX 安装**，选择 `shared-terminal-mcp-<平台>-0.4.0.vsix`。更新后重新加载窗口，使界面和后台代码一起更新。
 2. 打开一个可信工作区。插件自动启动服务并接入 VS Code、本机 Codex，无需填写 MCP 配置、复制令牌、指定端口或安装 Node。底部出现 **协作终端** 面板。
 3. 在面板工具栏或命令面板运行：
    - `协作终端: 打开本地终端`
@@ -25,9 +25,9 @@
 
 接入异常时，点击状态栏或运行 **协作终端: 一键修复 AI 接入**，自动重做注册。无需编辑文件。已有 Codex 配置和其他 MCP 服务会保留；配置格式错误或存在用户自建的同名服务时，不会覆盖原文件，错误记录在 **协作终端 · 服务**。
 
-自动接入范围是同一桌面用户、同一 Codex 主机上的客户端，以及采用 VS Code MCP 服务发现的 Agent。运行在 WSL、SSH 远端或云端的独立 Agent 有自己的配置和进程环境，不会被本机插件强行修改。其他厂商的独立 Agent 需要对应的集成，不能仅靠启动一个 MCP 服务就自动注册到所有客户端。
+自动接入范围是同一扩展宿主用户、同一 Codex 主机上的客户端，以及采用 VS Code MCP 服务发现的 Agent。处于其他宿主（例如另一侧 Windows / WSL 或云端）的独立 Agent 有自己的配置和进程环境，不会被当前宿主插件自动注册。其他厂商的独立 Agent 需要对应的集成，不能仅靠启动一个 MCP 服务就自动注册到所有客户端。
 
-实现说明：注册遵循 `CODEX_HOME`，未设置时使用 `~/.codex/config.toml`。只维护带注释标记的 `mcp_servers.shared_terminal` 区块。稳定的 stdio 启动入口位于插件全局存储中，由 VS Code 自带运行时执行；令牌留在窗口发现文件中，不写进 Codex 配置。窗口记录每 20 秒更新、90 秒过期，正常关闭时移除。桥接器按会话 UUID 转发，多个窗口无法确定目标时要求 Agent 指定 `windowId`，不会随便选择另一个窗口。写入失败不自动重试。
+实现说明：注册遵循 `CODEX_HOME`，未设置时使用 `~/.codex/config.toml`。只维护带注释标记的 `mcp_servers.shared_terminal` 区块。稳定的 stdio 启动入口位于插件全局存储中，由 VS Code 自带运行时执行；令牌留在窗口发现文件中，不写进 Codex 配置。串口节流期间工具调用最长等待 180 秒。窗口记录每 20 秒更新、90 秒过期，正常关闭时移除。桥接器按会话 UUID 转发，多个窗口无法确定目标时要求 Agent 指定 `windowId`，不会随便选择另一个窗口。写入失败不自动重试。
 
 兼容旧客户端：项目 `.shared-terminal/mcp.json` 也在启动时自动生成并加入 Git 忽略。具有本机文件和命令工具的 AI 可读取它直接连接当前窗口。同一文件夹被多个窗口打开时，该兼容文件以最后写入的窗口为准；Codex 桥接器分别保留各窗口，不受这个限制。
 
@@ -55,43 +55,36 @@
 
 ## MCP 工具
 
+0.4.0 将 HTTP 接口从 10 个工具收敛到 4 个；旧版 `open_*`、`show_session`、`close_session`、`list_ssh_profiles`、`list_serial_ports` 合并为 `session`。升级后重新加载插件并刷新 / 重启 Agent 的 MCP 连接。
+
 | 工具 | 用途 |
 | --- | --- |
-| `list_sessions` | 列出共享会话及状态 |
-| `list_ssh_profiles` | 列出 SSH 配置，不返回密码 |
-| `list_serial_ports` | 枚举本机串口 |
-| `open_local_terminal` | 创建可见的本地交互式 Shell |
-| `open_ssh` | 使用保存的 `profile` 连接 SSH |
-| `open_serial` | 使用 `path`、`baudRate` 等参数打开串口 |
-| `write_session` | 向会话发送 UTF-8 或 base64 数据 |
-| `read_session` | 按游标读取输出、双方输入与连接状态 |
-| `show_session` | 用户明确要求时显示会话，可能切换底部标签；读写无需调用 |
-| `close_session` | 关闭双方共享的连接 |
-| `list_windows` | Codex 桥接器额外提供：列出窗口 ID 和项目路径 |
+| `list_sessions` | 列出会话 ID、类型、名称和状态 |
+| `read_session` | 按游标读取双方输入、输出、状态，默认精简文本 |
+| `write_session` | 发送 UTF-8 / base64 精确字节，不附加换行 |
+| `session` | `action`: `profiles` / `ports` 枚举；`local` / `ssh` / `serial` 打开；`show` 显示；`close` 关闭 |
 
-Codex 桥接器的工具额外接受可选 `windowId`；`list_sessions`、`list_ssh_profiles` 的结果包含窗口归属。所有窗口正常时保持数组结果；部分窗口暂时不可用时，返回 `sessions` / `profiles` 数组与 `unavailableWindows`，明确告知不完整结果。
-
-示例流程：
+Codex 桥接器另有 `list_windows`，并支持可选 `windowId`。`list_sessions` 和 `session({action:"profiles"})` 可汇总多个窗口；部分窗口不可用时返回 `unavailableWindows`。跨窗口不明确时必须指定窗口，不会猜测目标。
 
 ```text
-open_ssh({"profile":"开发板"})
+session({"action":"ssh","profile":"开发板"})
 → 返回 id
-
 write_session({"sessionId":"返回的 id","data":"uname -a\r"})
 read_session({"sessionId":"返回的 id","after":0,"waitMs":1000})
-→ 保存 nextCursor，下次读取时作为 after
+→ 保存 nextCursor，下次作为 after；hasMore 为 true 时继续读取
 
-open_serial({"path":"COM3","baudRate":115200})
+session({"action":"serial","serial":{"path":"COM3","baudRate":115200}})
 write_session({"sessionId":"返回的 id","data":"help\r\n"})
 write_session({"sessionId":"返回的 id","data":"AP8NCg==","encoding":"base64"})
+read_session({"sessionId":"返回的 id","format":"raw"})
+session({"action":"close","sessionId":"返回的 id"})
 ```
 
-- `write_session` 不自动附加换行：Shell 回车通常用 `\r`，设备要求 CRLF 时用 `\r\n`。每次最多发送 16 KiB。
-- AI 读写已有会话不会切换你当前的底部标签或键盘焦点。你可以一直留在原生串口终端；只有明确调用 `show_session` 才会显示会话界面。
-- 发送成功只表示输入已交给连接，不代表命令执行完成。使用 `read_session` 判断输出。
-- `read_session` 默认最多返回 200 条事件，上限 500；`waitMs` 最长 30 秒。读取不消耗其他客户端的事件。
-- 每个会话保留约 1 MiB 的内存历史。`truncated: true` 表示旧数据已淘汰。输出可能含 ANSI 控制码，二进制串口数据以 `base64` 字段为准；UTF-8 文本可能跨事件分片。
-- 最多保留 64 个会话，优先淘汰已关闭会话的历史。重载窗口会关闭连接并清除历史。
+- 每次写入最多 16 KiB；Shell 回车通常用 `\r`。串口发送会等待全部字节发送及节流完成，成功不表示命令已执行完成。超时后先读取结果，禁止盲目重发。
+- 默认读取最多 50 条事件（上限 100），按约 8 KiB 的事件 JSON 预算分页；连续输出会合并到约 8 KiB，单条超过预算时仍完整返回一条以保证游标前进、不丢数据。省略重复的 base64、时间戳和会话 ID。`format:"raw"` 保留时间戳和原始字节，适合二进制分析；跨分包 UTF-8 会增量解码。
+- `waitMs` 最长 30 秒；默认 `settleMs:120`，第一次等到新事件后再收集 120ms 内到达的串口分包。`settleMs` 可按设备调整到 0–1000ms。它只合并突发数据，不判断命令完成。读取不消耗其他客户端的历史，`truncated:true` 表示旧历史已淘汰。每会话约 1 MiB，最多 64 个会话，重载窗口会关闭连接并清除历史。
+- 日常读写不切换标签或键盘焦点；只有用户要求时才调用 `session({action:"show",sessionId:...})`。
+- 原生终端会直接显示 `[AI →] "输入内容"`，即使设备不回显也可见。控制字符以 JSON 转义显示，记录的是发送尝试；失败另有状态提示。这是输入记录，设备自身回显仍会保留。完整记录也保存在“AI 输入记录”输出频道。
 
 ## SSH
 
@@ -113,13 +106,16 @@ write_session({"sessionId":"返回的 id","data":"AP8NCg==","encoding":"base64"}
 
 收发区以 **RX** 标记设备接收、**TX** 标记人工发送、**AI** 标记 AI 发送。支持文本 / HEX 显示、时间戳、自动滚动、清空显示，以及多个串口会话之间切换。没有设备回显时仍能看到发送记录。界面最多保留 1000 条记录；清空显示不删除 MCP 的会话历史。
 
-点击 **终端 ↗** 可切换到原生终端逐键输入；该终端与监视器、MCP 共用同一条连接。原生串口终端没有本地回显或行编辑。点击 **断开** 会释放串口，对双方同时生效。没有新增人工接管或 AI 写入锁。
+点击 **终端 ↗** 可切换到原生终端逐键输入；该终端与监视器、MCP 共用同一条连接。原生串口终端显示 AI 输入记录；人工逐键输入仍依赖设备回显，不提供行编辑。点击 **断开** 会释放串口，对双方同时生效。人工和 AI 共用同一发送队列，不提供人工接管锁。
+
+发送节奏统一在串口后端控制：每组最多 **4 个字节**，等待驱动 `drain` 后再等 **6ms**，下一组才开始；最后一组同样等待，所以跨调用也不会突发发送。按字节计数，不按字符计数。监视器、原生终端和 Agent 都使用这条队列。队列含正在发送的数据最多 16 KiB，满时明确拒绝新输入。关闭 / 拔出 / 发送失败停止后续队列，不自动重发部分命令。低波特率和操作系统调度会让实际发送更慢，6ms 不是硬实时保证。
 
 ## 开发与验证
 
 ```powershell
 npm ci
 npm test
+npx playwright install chromium
 npm run test:ui
 npm run package
 ```
@@ -130,9 +126,22 @@ npm run package
 
 `npm test` 包含真实本地 PTY、回环 SSH 服务、官方 MCP SDK HTTP 客户端、串口原生模块加载以及 SerialPortMock 二进制收发测试。`src/integration/run.ts` 另提供真实 VS Code Extension Host 联调入口。模拟串口测试不替代实际硬件验证。
 
-`npm run test:ui` 使用本机 Microsoft Edge 无头模式检查真实面板 HTML/CSS/JS，使用模拟设备消息，不连接硬件；界面截图保存到 `.test-results`。
+`npm run test:ui` 默认使用 Playwright Chromium 无头模式（可用环境变量 `PLAYWRIGHT_CHANNEL=chrome` 或 `msedge` 选择已安装浏览器）检查真实面板 HTML/CSS/JS，使用模拟设备消息，不连接硬件；界面截图保存到 `.test-results`。
 
-主要面向 Windows x64 桌面 VS Code 1.102+。使用 `extensionKind: ui`：在 Remote SSH 窗口中仍连接桌面机器的串口、Shell 和回环 MCP。VS Code Web 不支持。其他平台需要在对应系统重新安装依赖和打包，尤其 Linux 的 node-pty 可能需要本机编译工具链。
+支持 macOS、Windows、Linux，以及以 Linux 扩展宿主运行的 WSL；要求桌面 VS Code 1.102+，不支持 VS Code Web。原生模块需要按目标系统 / CPU 架构安装依赖并打包，不能把 macOS 的 VSIX 当作 Linux 包安装。CI 为 macOS arm64、Windows x64、Linux x64 分别构建并测试，其他架构需在对应机器构建：
+
+```text
+npm ci
+npm test
+npm run package -- --target darwin-arm64
+# 其他示例：darwin-x64 / win32-x64 / win32-arm64 / linux-x64 / linux-arm64
+```
+
+扩展优先运行在工作区宿主（`extensionKind: ["workspace", "ui"]`）。在 Remote WSL 中将插件安装到 WSL，使用 Linux 构建、Linux Shell、WSL 内的 Agent 配置和设备路径；USB 串口须先透传给 WSL，Windows 的 COM 口不会自动变成 `/dev/ttyUSB0`。若希望在 WSL 窗口共享 Windows COM 口，则在本地安装 Windows 版本并配置 `"remote.extensionKind": {"local-tools.shared-terminal-mcp": ["ui"]}`，这时 Shell、串口和自动注册都属于 Windows 主机。两种模式不会自动桥接 Windows 与 WSL 中彼此独立的 Agent。
+
+Remote SSH 同理：默认操作远程主机的 Shell、串口和 Agent；可显式设为 UI 宿主以操作桌面机器。这一宿主选择遵循 [VS Code 远程扩展机制](https://code.visualstudio.com/api/advanced-topics/remote-extensions)。macOS 默认使用登录 Shell（回退 zsh），Linux / WSL 回退 `/bin/sh`，Windows 默认 PowerShell；可在 `sharedTerminal.shell` 中指定程序路径。Linux 串口权限由系统管理，账号需有设备访问权限。
+
+安装及打包时会修复 node-pty POSIX `spawn-helper` 的可执行位，避免 macOS 出现 `posix_spawnp failed`。本次本机验证范围见 `VALIDATION.md`，CI 配置不代表已在所有平台实测。
 
 ## 实现参考
 

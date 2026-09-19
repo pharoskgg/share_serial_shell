@@ -85,3 +85,22 @@ test('serial adapter preserves binary bytes and accepts both actors through a mo
     assert.deepEqual(received, port.port?.recording);
   } finally { session.close(); }
 });
+
+test('serial driver write failures close the session and cancel queued input', async () => {
+  const session = new Session('serial', 'failed device');
+  let writes = 0, closed = false;
+  await attachSerial(session, {
+    get isOpen() { return !closed; }, on() {},
+    open(callback) { callback(null); },
+    write(_bytes, callback) { writes++; callback(new Error('driver failed')); },
+    drain(callback) { callback(null); },
+    close(callback) { closed = true; callback(null); },
+  });
+  await Promise.all([
+    assert.rejects(session.write(Buffer.alloc(8), 'ai'), /driver failed/),
+    assert.rejects(session.write(Buffer.alloc(4), 'human')),
+  ]);
+  assert.equal(session.state, 'closed');
+  assert.equal(writes, 1);
+  assert.equal(closed, true);
+});

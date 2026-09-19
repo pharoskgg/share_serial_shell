@@ -20,7 +20,7 @@ export function updateCodexConfig(original: string, executable: string, launcher
   const parsed = TOML.parse(original);
   const newline = original.includes('\r\n') ? '\r\n' : '\n';
   const block = [begin, `[mcp_servers.${serverName}]`, `command = ${JSON.stringify(executable)}`,
-    `args = [${JSON.stringify(launcher)}]`, 'startup_timeout_sec = 20', 'tool_timeout_sec = 45',
+    `args = [${JSON.stringify(launcher)}]`, 'startup_timeout_sec = 20', 'tool_timeout_sec = 180',
     `[mcp_servers.${serverName}.env]`, 'ELECTRON_RUN_AS_NODE = "1"', end, ''].join(newline);
   const start = original.indexOf(begin);
   let updated: string;

@@ -37,14 +37,16 @@ test('bridge routes exact session IDs across windows, refuses ambiguous opens, a
     const endpoint2: WindowEndpoint = { id: randomUUID(), label: 'two', roots: [join(directory, 'two')], url: service2.url, token: 'two', expiresAt: Date.now() + 90000 };
     await publishWindow(directory, endpoint1); await publishWindow(directory, endpoint2);
     const router = new WindowRouter(directory, directory);
-    await assert.rejects(router.invoke('open_local_terminal', {}), /多个/);
-    const session = decode(await router.invoke('open_local_terminal', { windowId: endpoint2.id }));
+    const profiles = decode(await router.invoke('session', { action: 'profiles' }));
+    assert.deepEqual(new Set(profiles.map((profile: any) => profile.windowId)), new Set([endpoint1.id, endpoint2.id]));
+    await assert.rejects(router.invoke('session', { action: 'local' }), /多个/);
+    const session = decode(await router.invoke('session', { action: 'local', windowId: endpoint2.id }));
     await router.invoke('write_session', { sessionId: session.id, data: 'test\r' });
     assert.equal(first.writes(), 0); assert.equal(second.writes(), 1);
     assert.equal(decode(await router.invoke('list_sessions', {}))[0].windowId, endpoint2.id);
     await assert.rejects(router.invoke('write_session', { sessionId: session.id, windowId: endpoint1.id, data: 'wrong' }), /找不到/);
     const matched = new WindowRouter(directory, join(directory, 'one', 'src'));
-    await matched.invoke('open_local_terminal', {});
+    await matched.invoke('session', { action: 'local' });
     assert.equal(first.sessions.list().length, 1);
     await service2.close();
     replacement = await startMcp(second.sessions, second.actions, 'rotated-token');
@@ -71,14 +73,14 @@ test('real stdio bridge starts without VS Code, discovers a later window and exp
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
-    assert.equal(tools.length, 11);
+    assert.equal(tools.length, 5);
     assert.ok(tools.some(tool => tool.name === 'write_session'));
     assert.deepEqual(decode(await client.callTool({ name: 'list_windows', arguments: {} })), []);
     const absent = await client.callTool({ name: 'list_sessions', arguments: {} });
     assert.equal(absent.isError, true);
     const id = randomUUID();
     await publishWindow(join(directory, 'windows'), { id, label: 'later window', roots: [], url: service.url, token: 'stdio-token', expiresAt: Date.now() + 90000 });
-    const opened = decode(await client.callTool({ name: 'open_local_terminal', arguments: {} }));
+    const opened = decode(await client.callTool({ name: 'session', arguments: { action: 'local' } }));
     const write = await client.callTool({ name: 'write_session', arguments: { sessionId: opened.id, data: 'from stdio\r' } });
     assert.ok(!write.isError);
     assert.equal(backend.writes(), 1);

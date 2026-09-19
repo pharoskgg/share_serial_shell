@@ -3,7 +3,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { unlink } from 'node:fs/promises';
-import { StringDecoder } from 'node:string_decoder';
+import { TerminalTranscript } from './terminal-transcript';
+import { defaultShell, workspacePaths } from './platform';
 import { connectLocal, connectSerial, connectSsh, listSerialPorts, type SerialOptions, type SshProfile } from './backends';
 import { startMcp, type Actions } from './mcp';
 import { Sessions, Session, type Entry } from './session';
@@ -19,28 +20,11 @@ class TerminalBridge implements vscode.Pseudoterminal {
   private readonly closer = new vscode.EventEmitter<number>();
   readonly onDidWrite = this.writer.event;
   readonly onDidClose = this.closer.event;
-  private ready = false;
-  private pending = '';
   private dimensions?: vscode.TerminalDimensions;
-  private readonly decoder = new StringDecoder('utf8');
-  private readonly data = (chunk: Buffer) => this.display(this.decoder.write(chunk));
-  private readonly entry = (entry: Entry) => {
-    if (entry.type === 'status') { this.display(`\r\n\x1b[90m[协作终端] ${entry.data.replace(/[\x00-\x1f\x7f]/g, ' ')}\x1b[0m\r\n`); }
-  };
-  private readonly ended = () => { this.display(this.decoder.end()); };
-  constructor(readonly session: Session) {
-    session.on('data', this.data);
-    session.on('entry', this.entry);
-    session.on('closed', this.ended);
-  }
-  private display(text: string): void {
-    if (this.ready) { this.writer.fire(text); }
-    else { this.pending = (this.pending + text).slice(-1024 * 1024); }
-  }
+  private readonly transcript: TerminalTranscript;
+  constructor(readonly session: Session) { this.transcript = new TerminalTranscript(session); }
   open(dimensions?: vscode.TerminalDimensions): void {
-    this.ready = true;
-    this.writer.fire('\x1b[90m人和 AI 共享输入 · AI 的原始输入可在“协作终端 · AI 输入记录”中查看\x1b[0m\r\n' + this.pending);
-    this.pending = '';
+    this.transcript.open(text => this.writer.fire(text));
     if (dimensions) { this.setDimensions(dimensions); }
   }
   close(): void { this.session.close('Terminal closed by user'); this.dispose(); }
@@ -51,7 +35,7 @@ class TerminalBridge implements vscode.Pseudoterminal {
       for (let offset = 0; offset < characters.length; offset += 2048) {
         await this.session.write(Buffer.from(characters.slice(offset, offset + 2048).join('')), 'human');
       }
-    })().catch(error => this.display(`\r\n[输入失败] ${String(error)}\r\n`));
+    })().catch(error => this.transcript.display(`\r\n[输入失败] ${String(error)}\r\n`));
   }
   setDimensions(dimensions: vscode.TerminalDimensions): void {
     this.dimensions = dimensions;
@@ -59,9 +43,7 @@ class TerminalBridge implements vscode.Pseudoterminal {
   }
   applyDimensions(): void { if (this.dimensions) { this.setDimensions(this.dimensions); } }
   dispose(): void {
-    this.session.off('data', this.data);
-    this.session.off('entry', this.entry);
-    this.session.off('closed', this.ended);
+    this.transcript.dispose();
     this.writer.dispose(); this.closer.dispose();
   }
 }
@@ -98,6 +80,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   status.command = 'sharedTerminal.enableAiConnection';
   context.subscriptions.push(audit, serviceLog, tree, status, sessions, vscode.window.registerTreeDataProvider('sharedTerminal.sessions', tree));
 
+  const roots = () => workspacePaths(vscode.workspace.workspaceFolders?.map(folder => folder.uri) ?? [],
+    vscode.env.remoteName !== undefined && context.extension.extensionKind === vscode.ExtensionKind.Workspace);
   const config = () => vscode.workspace.getConfiguration('sharedTerminal');
   const profiles = () => config().get<SshProfile[]>('sshProfiles', []);
   const secretKey = (profile: SshProfile) => `ssh:${JSON.stringify([profile.host, profile.port ?? 22, profile.username])}`;
@@ -133,10 +117,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     profiles: () => profiles().map(({ name, host, port, username }) => ({ name, host, port, username })),
     ports: listSerialPorts,
     openLocal: async (name = '本地 Shell') => {
-      const shell = config().get<string>('shell') || (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/bash');
-      const workspace = vscode.workspace.workspaceFolders?.find(folder => folder.uri.scheme === 'file');
+      const shell = config().get<string>('shell') || defaultShell();
       const session = sessions.create('local', name);
-      return connect(session, () => connectLocal(session, shell, workspace?.uri.fsPath ?? homedir()));
+      return connect(session, () => connectLocal(session, shell, roots()[0] ?? homedir()));
     },
     openSsh: async name => {
       const profile = profiles().find(profile => profile.name === name);
@@ -252,7 +235,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const windowId = randomUUID();
     let stopped = false;
     let pending: Promise<void> = Promise.resolve();
-    const roots = () => vscode.workspace.workspaceFolders?.filter(folder => folder.uri.scheme === 'file').map(folder => folder.uri.fsPath) ?? [];
     const heartbeat = () => {
       pending = pending.catch(() => {}).then(async () => {
         if (stopped) { return; }

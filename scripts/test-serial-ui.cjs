@@ -22,18 +22,19 @@ const http = require('node:http');
     } else { res.writeHead(404).end(); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
-  const page = await browser.newPage({ viewport: { width: 1180, height: 440 }, deviceScaleFactor: 1 });
-  const errors = [];
-  page.on('pageerror', err => errors.push(err.message));
-  await page.addInitScript(() => {
-    window.__messages = [];
-    let state;
-    window.acquireVsCodeApi = () => ({ postMessage: message => window.__messages.push(message), getState: () => state, setState: value => { state = value; } });
-  });
-  const emit = data => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), data);
-  const last = type => page.evaluate(type => window.__messages.filter(message => message.type === type).at(-1), type);
+  let browser;
   try {
+    browser = await chromium.launch({ ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}), headless: true });
+    const page = await browser.newPage({ viewport: { width: 1180, height: 440 }, deviceScaleFactor: 1 });
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.addInitScript(() => {
+      window.__messages = [];
+      let state;
+      window.acquireVsCodeApi = () => ({ postMessage: message => window.__messages.push(message), getState: () => state, setState: value => { state = value; } });
+    });
+    const emit = data => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), data);
+    const last = type => page.evaluate(type => window.__messages.filter(message => message.type === type).at(-1), type);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.waitForFunction(() => window.__messages.some(m => m.type === 'ready'));
     await emit({ type: 'state', ports: [], sessions: [], connecting: false });
@@ -92,5 +93,5 @@ const http = require('node:http');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'No horizontal page overflow');
     assert.deepEqual(errors, []);
     console.log('Serial panel UI: PASS (empty state, manual port, device selection, parameters, refresh, send, HEX, disconnect, XSS, narrow layout)');
-  } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
+  } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -2,7 +2,7 @@
   "name": "shared-terminal-mcp",
   "displayName": "协作终端 MCP",
   "description": "人和 AI 共用的 SSH、串口与本地终端，支持实时观测和共同输入。",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "local-tools",
   "license": "MIT",
   "engines": {
@@ -12,6 +12,7 @@
     "Other"
   ],
   "extensionKind": [
+    "workspace",
     "ui"
   ],
   "main": "./dist/extension.js",
@@ -29,10 +30,11 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -w -p .",
-    "test": "npm run compile && node --test dist/test",
-    "vscode:prepublish": "npm run compile",
+    "test": "npm run compile && node scripts/test.cjs",
+    "vscode:prepublish": "node scripts/prepare-native.cjs && npm run compile",
     "package": "vsce package --allow-missing-repository",
-    "test:ui": "node scripts/test-serial-ui.cjs"
+    "test:ui": "node scripts/test-serial-ui.cjs",
+    "postinstall": "node scripts/prepare-native.cjs"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

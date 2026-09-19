@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 
 export type SessionKind = 'local' | 'ssh' | 'serial';
 export interface Backend {
@@ -24,6 +25,7 @@ export class Session extends EventEmitter {
   private entries: Entry[] = [];
   private sequence = 0;
   private bytes = 0;
+  private readonly outputDecoder = new StringDecoder('utf8');
   constructor(readonly kind: SessionKind, readonly name: string, private readonly historyLimit = 1024 * 1024) { super(); }
 
   attach(backend: Backend): void {
@@ -51,7 +53,9 @@ export class Session extends EventEmitter {
     // Bound individual records even when a backend emits a very large chunk.
     for (let i = 0; i < bytes.length; i += 8192) {
       const chunk = bytes.subarray(i, i + 8192);
-      this.record('output', chunk.toString('utf8'), undefined, chunk);
+      // Keep incomplete UTF-8 sequences across driver chunks. The base64 field
+      // still preserves each exact chunk for raw readers.
+      this.record('output', this.outputDecoder.write(chunk), undefined, chunk);
       this.emit('data', chunk);
     }
   }
@@ -78,13 +82,53 @@ export class Session extends EventEmitter {
     };
   }
 
-  async waitForEntries(after: number, waitMs: number): Promise<void> {
-    if (this.sequence > after || this.state === 'closed' || waitMs === 0) { return; }
-    await new Promise<void>(resolve => {
+  readForAgent(after = 0, limit = 50, format: 'text' | 'raw' = 'text') {
+    const read = this.read(after, limit);
+    const events: object[] = [];
+    let size = 0;
+    let nextCursor = after;
+    for (const entry of read.events) {
+      const event: any = format === 'raw' ? { ...entry } : { seq: entry.seq, type: entry.type, actor: entry.actor, data: entry.data };
+      const previous = events.at(-1) as ({ seq: number; type: Entry['type']; data: string; base64?: string } | undefined);
+      if (previous?.type === 'output' && entry.type === 'output') {
+        const merged = { ...previous, seq: entry.seq, data: previous.data + event.data };
+        if (format === 'raw' && previous.base64 !== undefined && event.base64 !== undefined) {
+          merged.base64 = Buffer.concat([
+            Buffer.from(previous.base64, 'base64'), Buffer.from(event.base64, 'base64'),
+          ]).toString('base64');
+        }
+        const previousSize = Buffer.byteLength(JSON.stringify(previous));
+        const mergedSize = Buffer.byteLength(JSON.stringify(merged));
+        if (size - previousSize + mergedSize <= 8192) {
+          events[events.length - 1] = merged;
+          size = size - previousSize + mergedSize;
+          nextCursor = entry.seq;
+          continue;
+        }
+      }
+      const bytes = Buffer.byteLength(JSON.stringify(event));
+      // Always include one complete event so cursors progress without losing bytes.
+      if (events.length && size + bytes > 8192) { break; }
+      events.push(event); size += bytes; nextCursor = entry.seq;
+    }
+    return { state: read.state, events, nextCursor, hasMore: nextCursor < read.latestCursor,
+      ...(read.truncated ? { truncated: true } : {}) };
+  }
+
+  async waitForEntries(after: number, waitMs: number, settleMs = 0): Promise<void> {
+    if (this.sequence <= after && this.state !== 'closed' && waitMs > 0) {
+      await new Promise<void>(resolve => {
       const done = () => { clearTimeout(timer); this.off('entry', done); resolve(); };
       const timer = setTimeout(done, waitMs);
       this.once('entry', done);
-    });
+      });
+    }
+    // Once at least one event is available, hold the response open for a short,
+    // bounded aggregation window so a burst of serial driver chunks is returned
+    // together. This is not a command-completion detector.
+    if (settleMs > 0 && this.sequence > after && this.state !== 'closed') {
+      await new Promise<void>(resolve => setTimeout(resolve, settleMs));
+    }
   }
 
   close(reason = 'Closed'): void {
@@ -93,6 +137,8 @@ export class Session extends EventEmitter {
     const backend = this.backend;
     this.backend = undefined;
     try { backend?.close(); } catch { /* Already disconnected. */ }
+    const tail = this.outputDecoder.end();
+    if (tail) { this.record('output', tail); }
     this.record('status', reason);
     this.emit('change');
     this.emit('closed');

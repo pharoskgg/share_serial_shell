@@ -24,10 +24,12 @@ test('real MCP HTTP client discovers, writes, reads, and closes a shared termina
     assert.equal((await fetch(service.url, { method: 'POST', headers: { Authorization: 'Bearer test-token', Origin: 'https://example.org' } })).status, 403);
     assert.equal((await fetch(service.url, { method: 'POST', headers: { Authorization: 'Bearer wrong' } })).status, 401);
     await client.connect(new StreamableHTTPClientTransport(new URL(service.url), { requestInit: { headers: { Authorization: 'Bearer test-token' } } }));
-    const names = (await client.listTools()).tools.map(tool => tool.name);
-    assert.equal(names.length, 10);
-    assert.ok(names.includes('open_serial'));
-    const opened = await client.callTool({ name: 'open_local_terminal', arguments: {} });
+    const tools = (await client.listTools()).tools;
+    assert.ok(JSON.stringify(tools).length < 5000, 'Keep the complete tool catalog compact');
+    const names = tools.map(tool => tool.name);
+    assert.equal(names.length, 4);
+    assert.ok(names.includes('session'));
+    const opened = await client.callTool({ name: 'session', arguments: { action: 'local' } });
     const info = JSON.parse((opened.content as { text: string }[])[0].text);
     const session = sessions.get(info.id);
     await session.write(Buffer.from('human\r'), 'human');
@@ -38,9 +40,13 @@ test('real MCP HTTP client discovers, writes, reads, and closes a shared termina
     assert.ok(events.some((event: any) => event.actor === 'human' && event.data === 'human\r'));
     assert.ok(events.some((event: any) => event.actor === 'ai' && event.data === 'AI\r'));
     assert.ok(events.some((event: any) => event.type === 'output' && event.data === 'AI\r'));
+    assert.ok(events.every((event: any) => event.base64 === undefined && event.time === undefined));
+    const raw = await client.callTool({ name: 'read_session', arguments: { sessionId: info.id, format: 'raw' } });
+    const rawEvents = JSON.parse((raw.content as { text: string }[])[0].text).events;
+    assert.ok(rawEvents.some((event: any) => event.base64 === Buffer.from('AI\r').toString('base64')));
     const bad = await client.callTool({ name: 'write_session', arguments: { sessionId: info.id, data: '###', encoding: 'base64' } });
     assert.equal(bad.isError, true);
-    await client.callTool({ name: 'close_session', arguments: { sessionId: info.id } });
+    await client.callTool({ name: 'session', arguments: { action: 'close', sessionId: info.id } });
     const closed = await client.callTool({ name: 'write_session', arguments: { sessionId: info.id, data: 'no' } });
     assert.equal(closed.isError, true);
   } finally { await client.close(); sessions.dispose(); await service.close(); }
@@ -75,7 +81,7 @@ test('MCP text and binary writes preserve the current UI for serial, SSH and loc
     }
     assert.deepEqual(shown, [], 'Reading and writing must never invoke UI presentation');
     const id = sessions.list()[0].id;
-    await client.callTool({ name: 'show_session', arguments: { sessionId: id } });
+    await client.callTool({ name: 'session', arguments: { action: 'show', sessionId: id } });
     assert.deepEqual(shown, [id], 'Explicit show_session still works');
   } finally { await client.close(); sessions.dispose(); await service.close(); }
 });

@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { Client, type ConnectConfig } from 'ssh2';
 import { Session } from './session';
+import { SerialWriter } from './serial-writer';
 
 export interface SshProfile { name: string; host: string; port?: number; username: string; privateKeyPath?: string; agent?: string }
 export interface SerialOptions {
@@ -36,10 +37,19 @@ export async function attachSerial(session: Session, port: SerialDevice): Promis
   port.on('close', () => session.close('Serial disconnected'));
   session.once('closed', () => { if (port.isOpen) { port.close(() => {}); } });
   await new Promise<void>((resolve, reject) => port.open(error => error ? reject(error) : resolve()));
+  const writer = new SerialWriter(data => new Promise<void>((resolve, reject) => {
+    port.write(data, error => error ? reject(error) : port.drain(err => err ? reject(err) : resolve()));
+  }));
+  session.once('closed', () => writer.close());
+  if (session.state === 'closed') { writer.close(); }
   session.attach({
-    write: data => new Promise<void>((resolve, reject) => {
-      port.write(data, error => error ? reject(error) : port.drain(err => err ? reject(err) : resolve()));
-    }),
+    write: async data => {
+      try { await writer.write(data); }
+      catch (error) {
+        if (writer.isClosed) { session.close('Serial write failed or disconnected'); }
+        throw error;
+      }
+    },
     close: () => { if (port.isOpen) { port.close(() => {}); } },
   });
 }

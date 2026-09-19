@@ -53,3 +53,52 @@ test('large writes are rejected before dispatch and recorded history has a sessi
   assert.equal(sessions.list().length, 64);
   sessions.dispose();
 });
+
+test('compact reads paginate without dropping output and raw reads preserve binary data', () => {
+  const session = new Session('serial', 'read budget');
+  for (let i = 0; i < 20; i++) { session.output(Buffer.alloc(1000, i)); }
+  let cursor = 0;
+  let received = Buffer.alloc(0);
+  let pageCount = 0;
+  for (;;) {
+    const read = session.readForAgent(cursor, 50, 'raw');
+    assert.ok(JSON.stringify(read.events).length < 8300);
+    for (const event of read.events as any[]) {
+      received = Buffer.concat([received, Buffer.from(event.base64 ?? '', 'base64')]);
+    }
+    pageCount++;
+    cursor = read.nextCursor;
+    if (!read.hasMore) { break; }
+  }
+  assert.ok(pageCount >= 3, '8 KiB agent pages should paginate the 20 KiB stream');
+  assert.equal(cursor, session.read().latestCursor);
+  assert.equal(received.length, 20_000);
+  for (let i = 0; i < 20; i++) { assert.equal(received[i * 1000], i); }
+  const raw = session.readForAgent(0, 1, 'raw').events[0] as any;
+  assert.deepEqual(Buffer.from(raw.base64, 'base64'), Buffer.alloc(1000));
+  assert.ok(raw.time);
+});
+
+test('agent reads coalesce adjacent serial chunks, preserve cursors, and keep raw bytes', () => {
+  const session = new Session('serial', 'coalesced output');
+  session.output(Buffer.from([0xe4, 0xb8]));
+  session.output(Buffer.from([0xad, 0x0d, 0x0a]));
+  const text = session.readForAgent(0, 50, 'text');
+  const output = text.events.filter((event: any) => event.type === 'output') as any[];
+  assert.equal(output.length, 1);
+  assert.equal(output[0].data, '中\r\n');
+  assert.equal(text.nextCursor, session.read().latestCursor);
+  const raw = session.readForAgent(0, 50, 'raw').events.filter((event: any) => event.type === 'output') as any[];
+  assert.equal(raw.length, 1);
+  assert.deepEqual(Buffer.from(raw[0].base64, 'base64'), Buffer.from([0xe4, 0xb8, 0xad, 0x0d, 0x0a]));
+});
+
+test('settle window collects a serial burst without claiming command completion', async () => {
+  const session = new Session('serial', 'settled output');
+  session.output('first');
+  setTimeout(() => session.output(' second'), 20);
+  await session.waitForEntries(0, 0, 70);
+  const read = session.readForAgent(0, 50, 'text');
+  assert.equal((read.events.find((event: any) => event.type === 'output') as any).data, 'first second');
+  assert.equal(read.hasMore, false);
+});
