@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Session, Sessions } from '../session';
+import { SESSION_HISTORY_LIMIT, Session, Sessions } from '../session';
+
+test('default session history retains at least 30 MiB of serialized text', () => {
+  assert.equal(SESSION_HISTORY_LIMIT, 30 * 1024 * 1024);
+  const session = new Session('local', 'large history');
+  session.output(Buffer.alloc(2 * 1024 * 1024, 65));
+  assert.equal(session.read(0, Number.MAX_SAFE_INTEGER).truncated, false);
+});
 
 test('human and AI input share the backend without taking over or pausing', async () => {
   const session = new Session('serial', 'test');

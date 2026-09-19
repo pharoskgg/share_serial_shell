@@ -53,7 +53,7 @@ class SessionTree implements vscode.TreeDataProvider<Session> {
   readonly onDidChangeTreeData = this.changed.event;
   private readonly refresh = () => this.changed.fire();
   constructor(private readonly sessions: Sessions) { sessions.on('change', this.refresh); }
-  getChildren(): Session[] { return this.sessions.list(); }
+  getChildren(): Session[] { return this.sessions.list().filter(session => session.state !== 'closed'); }
   getTreeItem(session: Session): vscode.TreeItem {
     const item = new vscode.TreeItem(session.name);
     const states = { connecting: '连接中', open: '共同输入', closed: '已关闭' };

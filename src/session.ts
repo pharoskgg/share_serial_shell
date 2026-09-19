@@ -17,6 +17,9 @@ export interface Entry {
   base64?: string;
 }
 
+/** Keep enough history for exporting long-running terminal sessions. */
+export const SESSION_HISTORY_LIMIT = 30 * 1024 * 1024;
+
 /** One shared byte stream. Neither actor takes a lock or pauses the other. */
 export class Session extends EventEmitter {
   readonly id = randomUUID();
@@ -26,7 +29,7 @@ export class Session extends EventEmitter {
   private sequence = 0;
   private bytes = 0;
   private readonly outputDecoder = new StringDecoder('utf8');
-  constructor(readonly kind: SessionKind, readonly name: string, private readonly historyLimit = 1024 * 1024) { super(); }
+  constructor(readonly kind: SessionKind, readonly name: string, private readonly historyLimit = SESSION_HISTORY_LIMIT) { super(); }
 
   attach(backend: Backend): void {
     if (this.state === 'closed') { backend.close(); return; }
@@ -40,9 +43,12 @@ export class Session extends EventEmitter {
     const entry: Entry = { seq: ++this.sequence, time: new Date().toISOString(), type, data, actor };
     if (raw) { entry.base64 = raw.toString('base64'); }
     this.entries.push(entry);
-    this.bytes += Buffer.byteLength(JSON.stringify(entry));
+    // Count the original payload, rather than JSON/base64 overhead, so the
+    // configured limit describes the amount of text/bytes users can retain.
+    this.bytes += raw?.byteLength ?? Buffer.byteLength(data);
     while (this.bytes > this.historyLimit && this.entries.length > 1) {
-      this.bytes -= Buffer.byteLength(JSON.stringify(this.entries.shift()!));
+      const removed = this.entries.shift()!;
+      this.bytes -= removed.base64 ? Buffer.from(removed.base64, 'base64').byteLength : Buffer.byteLength(removed.data);
     }
     this.emit('entry', entry);
     return entry;
@@ -80,6 +86,11 @@ export class Session extends EventEmitter {
       nextCursor: events.at(-1)?.seq ?? after,
       latestCursor: this.sequence, truncated: after < first - 1,
     };
+  }
+
+  /** Return the currently retained history for local export without exposing the mutable array. */
+  history(): Entry[] {
+    return this.entries.map(entry => ({ ...entry }));
   }
 
   readForAgent(after = 0, limit = 50, format: 'text' | 'raw' = 'text') {

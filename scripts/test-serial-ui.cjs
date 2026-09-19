@@ -81,6 +81,8 @@ const http = require('node:http');
     assert.equal((await last('send')).encoding, 'hex');
     await page.locator('#disconnect').click();
     assert.equal((await last('disconnect')).sessionId, id);
+    await page.locator('#export').click();
+    assert.equal((await last('export')).sessionId, id);
     await page.locator('#clear').click();
     await emit({ type: 'snapshot', sessionId: id, events: [entry(7, 'output', 'old data')] });
     assert.equal(await page.locator('#output .event').count(), 0, 'Cleared history stays cleared when the view becomes visible again');

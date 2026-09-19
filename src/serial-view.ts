@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { Sessions, Session, type Entry } from './session';
@@ -13,6 +13,7 @@ const messageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('connect'), options: z.object(serialSchema) }),
   z.object({ type: z.literal('select'), sessionId: z.string().uuid() }),
   z.object({ type: z.literal('disconnect'), sessionId: z.string().uuid() }),
+  z.object({ type: z.literal('export'), sessionId: z.string().uuid() }),
   z.object({ type: z.literal('terminal'), sessionId: z.string().uuid() }),
   z.object({ type: z.literal('send'), sessionId: z.string().uuid(), data: z.string().max(65536), encoding: z.enum(['utf8', 'hex']), ending: z.enum(['none', 'cr', 'lf', 'crlf']) }),
 ]);
@@ -99,6 +100,22 @@ export class SerialView implements vscode.WebviewViewProvider, vscode.Disposable
     if (session.kind !== 'serial') { throw new Error('请选择串口会话'); }
     return session;
   }
+  private async exportSession(id: string): Promise<void> {
+    const session = this.serialSession(id);
+    const safeName = session.name.replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || 'serial-session';
+    const uri = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(`${safeName}.txt`),
+      filters: { '文本文件': ['txt'], '所有文件': ['*'] },
+      saveLabel: '导出串口记录',
+    });
+    if (!uri) { return; }
+    const lines = session.history().map(entry => {
+      const badge = entry.type === 'output' ? 'RX' : entry.type === 'input' ? (entry.actor === 'ai' ? 'AI' : 'TX') : 'STATUS';
+      return `${entry.time} [${badge}] ${entry.data}`;
+    });
+    await writeFile(uri.fsPath, lines.length ? `${lines.join('\n')}\n` : '', 'utf8');
+    void vscode.window.showInformationMessage(`已导出 ${lines.length} 条串口记录：${uri.fsPath}`);
+  }
   private async refresh(): Promise<void> {
     if (this.scanning) { return; }
     this.scanning = true;
@@ -123,6 +140,7 @@ export class SerialView implements vscode.WebviewViewProvider, vscode.Disposable
       } else if (message.type === 'select') {
         this.serialSession(message.sessionId); this.selected = message.sessionId; this.pushState(); this.snapshot();
       } else if (message.type === 'disconnect') { this.serialSession(message.sessionId).close('Disconnected by user'); }
+      else if (message.type === 'export') { await this.exportSession(message.sessionId); }
       else if (message.type === 'terminal') { this.serialSession(message.sessionId); this.showTerminal(message.sessionId); }
       else if (message.type === 'send') {
         await this.serialSession(message.sessionId).write(serialInput(message.data, message.encoding, message.ending), 'human');

@@ -31,6 +31,7 @@
     $('connect').textContent = state.connecting ? '连接中…' : duplicate ? '已连接' : '连接';
     $('disconnect').disabled = !session || session.state === 'closed';
     $('terminal').disabled = !session;
+    $('export').disabled = !session;
     $('input').disabled = !open; $('send').disabled = !open;
     $('status').classList.toggle('connected', open);
     $('status-text').textContent = session ? ({ open: '已连接', closed: '已断开', connecting: '连接中' }[session.state]) : '未连接';
@@ -136,6 +137,7 @@
     persist(); post('connect', { options: { path: path(), baudRate: Number($('baud').value), dataBits: Number($('dataBits').value), parity: $('parity').value, stopBits: Number($('stopBits').value), rtscts: $('flow').value === 'rtscts' } });
   });
   $('disconnect').addEventListener('click', () => { if (state.selected) post('disconnect', { sessionId: state.selected }); });
+  $('export').addEventListener('click', () => { if (state.selected) post('export', { sessionId: state.selected }); });
   $('sessions').addEventListener('change', () => { error(''); if ($('sessions').value) post('select', { sessionId: $('sessions').value }); });
   $('terminal').addEventListener('click', () => { if (state.selected) post('terminal', { sessionId: state.selected }); });
   $('clear').addEventListener('click', () => { if (selected) clearedAt[selected] = lastSeq; entries = []; rx = 0; tx = 0; $('counter').textContent = 'RX 0 B · TX 0 B'; render(); });
