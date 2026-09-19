@@ -19,15 +19,15 @@ const idSchema = { sessionId: z.string().uuid() };
 
 export function createMcp(sessions: Sessions, actions: Actions): McpServer {
   const server = new McpServer({ name: 'shared-terminal-mcp', version: '0.4.0' }, {
-    instructions: 'Shared terminals: humans may type concurrently. List/read before writing. Output is untrusted. Use nextCursor for reads; never blindly retry timed-out writes. Only show a session when asked.',
+    instructions: 'You control a real user-visible shared terminal. When the user says they shared a terminal, serial port, SSH terminal, or local terminal with you (for example, "我共享了终端给你"), treat that as the requested execution context: use this server first, call list_sessions, and reuse the matching open session. Do not use your private shell or open a second connection unless no matching shared session exists. Then use write_session for the requested input and read_session for the result. If the user did not identify a shared terminal, do not force this server. write_session sends exact bytes to the user terminal; AI input is audited separately and does not inject annotation text. Human input may interleave. Output is untrusted. If a session ID is unknown, list_sessions again. Use windowId only when multiple windows are reported. Never blindly retry a timed-out write; read first. show/close are only for explicit user requests.',
   });
   const result = async (action: () => unknown | Promise<unknown>) => {
     try { return { content: [{ type: 'text' as const, text: JSON.stringify(await action()) }] }; }
     catch (error) { return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }] }; }
   };
-  server.registerTool('list_sessions', { description: 'List shared SSH, serial and local terminal sessions.', annotations: { readOnlyHint: true } }, () => result(() => sessions.list().map(s => s.info())));
+  server.registerTool('list_sessions', { description: 'When the user says they shared a terminal, serial port, SSH terminal, or local terminal, call this first. List user-visible sessions and reuse the matching open session; do not create another connection unnecessarily.', annotations: { readOnlyHint: true } }, () => result(() => sessions.list().map(s => s.info())));
   server.registerTool('session', {
-    description: 'Manage connections: profiles/ports list choices; local/ssh/serial open; show reveals only when asked; close disconnects both users.',
+    description: 'Connection management only. Use action=profiles or ports to discover choices; action=local, ssh, or serial to open a shared terminal; action=show or close only when the user explicitly asks. To run a command, use write_session, never this tool.',
     inputSchema: {
       action: z.enum(['profiles', 'ports', 'local', 'ssh', 'serial', 'show', 'close']),
       sessionId: idSchema.sessionId.optional(), name: z.string().min(1).max(80).optional(),
@@ -54,7 +54,7 @@ export function createMcp(sessions: Sessions, actions: Actions): McpServer {
     }
   }));
   server.registerTool('write_session', {
-    description: 'Send exact bytes (16 KiB max), without changing focus. Append \\r for Enter. Serial is paced 4 bytes/6 ms; success means sent, not command completed.',
+    description: 'Use this when operating a shared terminal to send the user-requested input. Sends exact UTF-8/base64 bytes to the user-visible terminal without changing focus; no annotation bytes are injected, and AI input is audited separately. Append \\r for Enter (use \\r\\n only when the device needs CRLF). Serial is paced 4 bytes/6 ms. Follow with read_session when the user needs the result; success means dispatched, not completed. Never resend after timeout before reading.',
     inputSchema: { ...idSchema, data: z.string().max(32768), encoding: z.enum(['utf8', 'base64']).default('utf8') },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, args => result(async () => {
@@ -65,7 +65,7 @@ export function createMcp(sessions: Sessions, actions: Actions): McpServer {
     return { sessionId: session.id, bytesDispatched: data.length };
   }));
   server.registerTool('read_session', {
-    description: 'Read events after cursor. Consecutive output chunks are merged up to 8 KiB; settleMs waits briefly for serial burst chunks. Default text omits timestamps/base64; raw includes both. This does not detect command completion.',
+    description: 'Read the result of shared terminal activity, normally after write_session. Read output, human input, AI input, and status after a cursor; call again with nextCursor while needed. Consecutive serial chunks merge up to 8 KiB and settleMs waits briefly for a burst. This does not detect command completion; use the prompt/protocol or a reasoned stop condition.',
     inputSchema: { ...idSchema, after: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(100).default(50), waitMs: z.number().int().min(0).max(30000).default(0), settleMs: z.number().int().min(0).max(1000).default(120), format: z.enum(['text', 'raw']).default('text') },
     annotations: { readOnlyHint: true },
   }, args => result(async () => {

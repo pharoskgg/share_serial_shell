@@ -29,6 +29,9 @@ test('real MCP HTTP client discovers, writes, reads, and closes a shared termina
     const names = tools.map(tool => tool.name);
     assert.equal(names.length, 4);
     assert.ok(names.includes('session'));
+    assert.match(tools.find(tool => tool.name === 'list_sessions')?.description ?? '', /shared.*terminal.*call this first/i);
+    assert.match(tools.find(tool => tool.name === 'write_session')?.description ?? '', /operating a shared terminal/i);
+    assert.match(tools.find(tool => tool.name === 'read_session')?.description ?? '', /normally after write_session/i);
     const opened = await client.callTool({ name: 'session', arguments: { action: 'local' } });
     const info = JSON.parse((opened.content as { text: string }[])[0].text);
     const session = sessions.get(info.id);

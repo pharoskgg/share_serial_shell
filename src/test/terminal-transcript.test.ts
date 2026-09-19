@@ -12,9 +12,9 @@ for (const kind of ['serial', 'ssh', 'local'] as const) {
     await session.write(Buffer.from('help\r'), 'ai');
     let screen = '';
     transcript.open(text => { screen += text; });
-    assert.ok(screen.includes('[AI →] "help\\r"'));
+    assert.ok(!screen.includes('[AI →]'));
     await session.write(Buffer.from('\x03\x1b[2J\u009b2J'), 'ai');
-    assert.ok(screen.includes('\\u0003\\u001b[2J\\u009b2J'));
+    assert.ok(!screen.includes('\\u0003\\u001b[2J\\u009b2J'));
     assert.ok(!screen.includes('\x1b[2J'));
     assert.equal(sent.length, 2, 'Display must never send input back to backend');
     assert.equal(session.read().events.filter(e => e.type === 'output').length, 0);
