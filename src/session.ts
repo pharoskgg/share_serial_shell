@@ -20,6 +20,65 @@ export interface Entry {
 /** Keep enough history for exporting long-running terminal sessions. */
 export const SESSION_HISTORY_LIMIT = 30 * 1024 * 1024;
 
+interface AgentUnit {
+  entries: Entry[];
+  cursor: number;
+}
+
+function rawBytes(entry: Entry): Buffer {
+  return entry.base64 !== undefined ? Buffer.from(entry.base64, 'base64') : Buffer.from(entry.data);
+}
+
+function mergeEntries(entries: Entry[], type: Entry['type']): Entry {
+  const bytes = Buffer.concat(entries.map(rawBytes));
+  return {
+    ...entries[0],
+    seq: entries.at(-1)!.seq,
+    type,
+    data: type === 'status' ? entries.map(entry => entry.data).join('') : bytes.toString('utf8'),
+    ...(type === 'status' ? {} : { base64: bytes.toString('base64') }),
+  };
+}
+
+function isImmediateEcho(input: Entry, output: Entry): boolean {
+  return output.type === 'output' && rawBytes(input).equals(rawBytes(output));
+}
+
+/**
+ * Present terminal keystrokes as coherent bursts to agents. The retained history
+ * stays byte-for-byte and event-for-event unchanged for the UI and export.
+ *
+ * A typical native terminal produces `input h, output h, input e, output e`.
+ * Those echo pairs become one input event plus one output event, and are kept in
+ * one pagination unit so a cursor can never split or lose the reordered echo.
+ */
+function agentUnits(entries: Entry[]): AgentUnit[] {
+  const units: AgentUnit[] = [];
+  for (let index = 0; index < entries.length;) {
+    const first = entries[index];
+    if (first.type !== 'input' || first.actor !== 'human') {
+      units.push({ entries: [first], cursor: first.seq }); index++; continue;
+    }
+    const inputs: Entry[] = [];
+    const echoes: Entry[] = [];
+    const actor = first.actor;
+    let cursor = first.seq;
+    while (index < entries.length) {
+      const input = entries[index];
+      if (input.type !== 'input' || input.actor !== actor) { break; }
+      inputs.push(input); cursor = input.seq; index++;
+      if (index < entries.length && isImmediateEcho(input, entries[index])) {
+        echoes.push(entries[index]); cursor = entries[index].seq; index++;
+      }
+      if (/[\r\n]$/.test(input.data)) { break; }
+    }
+    const compacted = [mergeEntries(inputs, 'input')];
+    if (echoes.length) { compacted.push(mergeEntries(echoes, 'output')); }
+    units.push({ entries: compacted, cursor });
+  }
+  return units;
+}
+
 /** One shared byte stream. Neither actor takes a lock or pauses the other. */
 export class Session extends EventEmitter {
   readonly id = randomUUID();
@@ -94,33 +153,44 @@ export class Session extends EventEmitter {
   }
 
   readForAgent(after = 0, limit = 50, format: 'text' | 'raw' = 'text') {
-    const read = this.read(after, limit);
+    const requested = this.read(after, limit);
+    const cutoff = requested.events.at(-1)?.seq ?? after;
+    // `limit` normally bounds source events. Read a bounded look-ahead so that
+    // the last human keystroke burst can finish instead of being split merely
+    // because every key and its echo consumed two source-event slots.
+    const read = requested.events.length === limit ? this.read(after, limit + 1000) : requested;
     const events: object[] = [];
     let size = 0;
     let nextCursor = after;
-    for (const entry of read.events) {
-      const event: any = format === 'raw' ? { ...entry } : { seq: entry.seq, type: entry.type, actor: entry.actor, data: entry.data };
-      const previous = events.at(-1) as ({ seq: number; type: Entry['type']; data: string; base64?: string } | undefined);
-      if (previous?.type === 'output' && entry.type === 'output') {
-        const merged = { ...previous, seq: entry.seq, data: previous.data + event.data };
-        if (format === 'raw' && previous.base64 !== undefined && event.base64 !== undefined) {
-          merged.base64 = Buffer.concat([
-            Buffer.from(previous.base64, 'base64'), Buffer.from(event.base64, 'base64'),
-          ]).toString('base64');
+    for (const unit of agentUnits(read.events)) {
+      const candidate = events.map(event => ({ ...event })) as any[];
+      let candidateSize = size;
+      for (const entry of unit.entries) {
+        const event: any = format === 'raw' ? { ...entry } : { seq: entry.seq, type: entry.type, actor: entry.actor, data: entry.data };
+        const previous = candidate.at(-1) as ({ seq: number; type: Entry['type']; data: string; base64?: string } | undefined);
+        if (previous?.type === 'output' && entry.type === 'output') {
+          const merged = { ...previous, seq: entry.seq, data: previous.data + event.data };
+          if (format === 'raw' && previous.base64 !== undefined && event.base64 !== undefined) {
+            merged.base64 = Buffer.concat([
+              Buffer.from(previous.base64, 'base64'), Buffer.from(event.base64, 'base64'),
+            ]).toString('base64');
+          }
+          const previousSize = Buffer.byteLength(JSON.stringify(previous));
+          const mergedSize = Buffer.byteLength(JSON.stringify(merged));
+          if (candidateSize - previousSize + mergedSize <= 8192) {
+            candidate[candidate.length - 1] = merged;
+            candidateSize = candidateSize - previousSize + mergedSize;
+            continue;
+          }
         }
-        const previousSize = Buffer.byteLength(JSON.stringify(previous));
-        const mergedSize = Buffer.byteLength(JSON.stringify(merged));
-        if (size - previousSize + mergedSize <= 8192) {
-          events[events.length - 1] = merged;
-          size = size - previousSize + mergedSize;
-          nextCursor = entry.seq;
-          continue;
-        }
+        candidate.push(event); candidateSize += Buffer.byteLength(JSON.stringify(event));
       }
-      const bytes = Buffer.byteLength(JSON.stringify(event));
-      // Always include one complete event so cursors progress without losing bytes.
-      if (events.length && size + bytes > 8192) { break; }
-      events.push(event); size += bytes; nextCursor = entry.seq;
+      // Echo-compacted input/output pairs are atomic so pagination cannot skip
+      // an echo that was moved behind the complete human input burst.
+      if (events.length && candidateSize > 8192) { break; }
+      events.splice(0, events.length, ...candidate);
+      size = candidateSize; nextCursor = unit.cursor;
+      if (unit.cursor >= cutoff) { break; }
     }
     return { state: read.state, events, nextCursor, hasMore: nextCursor < read.latestCursor,
       ...(read.truncated ? { truncated: true } : {}) };
