@@ -44,8 +44,7 @@ export function updateCodexConfig(original: string, executable: string, launcher
   return updated;
 }
 
-export async function registerCodex(codexHome: string, storage: string, executable: string, modulePath: string): Promise<boolean> {
-  await mkdir(codexHome, { recursive: true, mode: 0o700 });
+export async function prepareBridge(storage: string, executable: string, modulePath: string): Promise<{ command: string; args: string[]; env: Record<string, string> }> {
   await mkdir(storage, { recursive: true, mode: 0o700 });
   // The launcher path survives extension upgrades. The running bridge discovers
   // each window afresh, so changing HTTP ports doesn't change Codex configuration.
@@ -53,6 +52,12 @@ export async function registerCodex(codexHome: string, storage: string, executab
   const launcher = join(storage, 'bridge.cjs');
   await atomicWrite(launcher, "const fs = require('node:fs'); const path = require('node:path');\n" +
     "Promise.resolve().then(() => require(JSON.parse(fs.readFileSync(path.join(__dirname, 'runtime.json'), 'utf8')).modulePath).runBridge(path.join(__dirname, 'windows'))).catch(() => { console.error('Shared terminal bridge could not start. Use the extension repair button.'); process.exitCode = 1; });\n");
+  return { command: executable, args: [launcher], env: { ELECTRON_RUN_AS_NODE: '1' } };
+}
+
+export async function registerCodex(codexHome: string, storage: string, executable: string, modulePath: string): Promise<boolean> {
+  await mkdir(codexHome, { recursive: true, mode: 0o700 });
+  const bridge = await prepareBridge(storage, executable, modulePath);
   const path = join(codexHome, 'config.toml');
   const lock = join(codexHome, '.shared-terminal-config.lock');
   const deadline = Date.now() + 5000;
@@ -67,7 +72,7 @@ export async function registerCodex(codexHome: string, storage: string, executab
     let original = '';
     try { original = await readFile(path, 'utf8'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; } }
-    const updated = updateCodexConfig(original, executable, launcher);
+    const updated = updateCodexConfig(original, bridge.command, bridge.args[0]);
     if (updated === original) { return false; }
     // Recheck immediately before replacing, so a concurrent external editor isn't
     // silently overwritten. Other plugin windows serialize on the lock above.

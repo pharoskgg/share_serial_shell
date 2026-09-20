@@ -97,6 +97,11 @@
         "command": "sharedTerminal.enableAiConnection",
         "title": "协作终端: 一键修复 AI 接入",
         "icon": "$(link)"
+      },
+      {
+        "command": "sharedTerminal.enableClaudeConnection",
+        "title": "协作终端: 一键接入 Claude CLI 和桌面应用",
+        "icon": "$(plug)"
       }
     ],
     "viewsContainers": {
@@ -165,6 +170,11 @@
           "command": "sharedTerminal.enableAiConnection",
           "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
           "group": "navigation@6"
+        },
+        {
+          "command": "sharedTerminal.enableClaudeConnection",
+          "when": "view == sharedTerminal.sessions || view == sharedTerminal.serial",
+          "group": "navigation@7"
         }
       ],
       "view/item/context": [

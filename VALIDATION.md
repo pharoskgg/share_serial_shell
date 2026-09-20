@@ -1,6 +1,6 @@
 # 0.4.0 本次验证
 
-环境：macOS arm64，Node.js 23。`npm test` 34 项全部通过，包括真实 PTY、回环 SSH、HTTP MCP、stdio 桥接器、SerialPortMock，以及新增的发送节流 / 排队 / 断开取消、正常设备回显不插入 AI 注释、精简读取分页、串口分包合并、跨分包 UTF-8、平台 Shell 和 WSL 路径测试。
+环境：macOS arm64，Node.js 23。`npm test` 42 项全部通过，包括真实 PTY、回环 SSH、HTTP MCP、stdio 桥接器、SerialPortMock，以及新增的发送节流 / 排队 / 断开取消、正常设备回显不插入 AI 注释、精简读取分页、串口分包合并、跨分包 UTF-8、平台 Shell 和 WSL 路径测试。Claude 一键接入覆盖 CLI / Desktop 双配置、保留无关状态、幂等更新、插件托管升级和同名用户配置拒绝覆盖；测试只写隔离临时目录，未修改本机真实 Claude 配置。
 
 串口面板浏览器测试通过（本机 Chrome）：空设备、手动设备路径、连接参数、AI 输入记录、HEX、断开、XSS 和窄窗口布局。未运行本次 VS Code Extension Host 联调。
 

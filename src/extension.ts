@@ -10,6 +10,7 @@ import { startMcp, type Actions } from './mcp';
 import { Sessions, Session, type Entry } from './session';
 import { publishConnection } from './discovery';
 import { registerCodex, publishWindow, type WindowEndpoint } from './agent-setup';
+import { registerClaudeClients } from './claude-setup';
 import { SerialView } from './serial-view';
 import { SerialViewUnavailableError } from './reveal-view';
 
@@ -277,6 +278,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (setupError) { serviceLog.show(true); }
       else { void vscode.window.showInformationMessage(lastActivity ? 'AI 已访问协作终端，接入正常。' : '自动接入已完成。首次接入前已运行的 Codex 如未显示工具，请重启 Codex 客户端；以后无需配置。'); }
     });
+    register('enableClaudeConnection', async () => {
+      try {
+        const results = await registerClaudeClients(homedir(), storage, process.execPath, join(context.extensionPath, 'dist', 'agent-bridge.js'));
+        for (const result of results) { serviceLog.appendLine(`${result.client} 接入${result.changed ? '已写入' : '已确认'}：${result.path}`); }
+        const clients = results.map(result => result.client).join('、');
+        const suffix = process.platform === 'linux' ? '；Claude Desktop 不支持 Linux。' : '；请完全重启已运行的 Claude 应用以加载工具。';
+        void vscode.window.showInformationMessage(`${clients} 一键接入完成${suffix}`);
+      } catch (error) {
+        serviceLog.appendLine(`Claude 一键接入失败：${error instanceof Error ? error.message : String(error)}`);
+        serviceLog.show(true);
+        throw error;
+      }
+    });
     // No opt-in flag: activation itself prepares the connection for agents.
     try { await publish(); }
     catch (error) { setupError = String(error); renderStatus(); serviceLog.appendLine(`自动接入失败：${setupError}`); }
@@ -293,6 +307,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     serviceLog.appendLine(`MCP startup failed: ${String(error)}`);
     register('mcpConfig', () => { throw new Error(`MCP 服务未启动：${String(error)}。请检查端口设置后重新加载窗口。`); });
     register('enableAiConnection', () => { throw new Error('MCP 服务尚未启动，请查看“协作终端 · 服务”输出。'); });
+    register('enableClaudeConnection', () => { throw new Error('MCP 服务尚未启动，请查看“协作终端 · 服务”输出。'); });
     void vscode.window.showErrorMessage(`协作终端 MCP 服务启动失败：${String(error)}。终端功能仍可使用。`);
   }
   status.show();
